@@ -1,0 +1,163 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // 1. GLOBAL SAFETY NET & HELPERS
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'rkstudycentre064@gmail.com' ||
+        request.auth.token.role == 'owner'
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches("^[a-zA-Z0-9_\\-]+$");
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ==========================================
+    // 2. ENTITY VALIDATIONS
+    // ==========================================
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.displayName is string && data.displayName.size() <= 128 &&
+             (data.get('enrolledCourseIds', []) is list && data.get('enrolledCourseIds', []).size() <= 20) &&
+             (data.get('completedTestIds', []) is list && data.get('completedTestIds', []).size() <= 100) &&
+             (data.get('role', 'student') == 'student' || isAdmin());
+    }
+
+    function isValidTestResult(data) {
+      return data.testId is string && data.testId.size() <= 128 &&
+             data.studentId == request.auth.uid &&
+             data.score is number && data.score >= 0 &&
+             data.completedAt is string;
+    }
+
+    // ==========================================
+    // 3. COLLECTION MATCH BLOCKS
+    // ==========================================
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isAdmin() || (isOwner(userId) && 
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'phone', 'phoneNumber', 'photoURL', 'classLevel', 'board', 'enrolledCourseIds', 'completedTestIds', 'updatedAt']) &&
+        isValidUser(incoming()));
+      allow delete: if isAdmin();
+    }
+
+    // Curriculum Hierarchy (Read Public, Write Admin)
+    match /classes/{classId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(classId);
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(subjectId);
+    }
+
+    match /books/{bookId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(bookId);
+    }
+
+    match /chapters/{chapterId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(chapterId);
+    }
+
+    // Study Materials & Tests
+    match /studyMaterials/{materialId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(materialId);
+    }
+
+    // Durable Cloud PDF Storage
+    match /pdfStorage/{fileId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(fileId);
+
+      match /chunks/{chunkId} {
+        allow read: if true;
+        allow write: if isAdmin() && isValidId(chunkId);
+      }
+    }
+
+    match /tests/{testId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(testId);
+    }
+
+    // Test Submissions
+    match /testResults/{resultId} {
+      allow read: if isAdmin() || (isSignedIn() && existing().studentId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(resultId) && isValidTestResult(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    // Courses
+    match /courses/{courseId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(courseId);
+    }
+
+    // Vlogs (Read Public, Action-based increments)
+    match /vlogs/{vlogId} {
+      allow read: if true;
+      allow create, delete: if isAdmin() && isValidId(vlogId);
+      allow update: if isAdmin() || (
+        isValidId(vlogId) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount', 'likesCount', 'commentsCount']) &&
+        incoming().viewsCount is number &&
+        incoming().likesCount is number
+      );
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn() && isValidId(commentId);
+        allow update, delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+      }
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(settingId);
+    }
+
+    // Connectivity Test
+    match /test/{docId} {
+      allow read: if true;
+    }
+  }
+}

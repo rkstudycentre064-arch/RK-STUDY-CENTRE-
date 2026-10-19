@@ -1,0 +1,60 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper: Check if user is authenticated Owner or Admin
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.email == 'rkstudycentre064@gmail.com' ||
+        request.auth.token.role == 'owner' ||
+        request.auth.token.role == 'admin' ||
+        request.auth.token.admin == true
+      );
+    }
+
+    // Institutional Notice & Circular Attachments (/notices/{noticeId}/{fileName})
+    match /notices/{noticeId}/{fileName} {
+      // READ: Publicly accessible so students, teachers, and parents can view/download published circulars
+      allow read: if true;
+
+      // UPLOAD / CREATE: Strictly Owner / Admin
+      // 1. Anonymous upload -> DENY
+      // 2. Student upload -> DENY
+      // 3. Teacher upload -> DENY
+      // 4. Owner upload -> ALLOW
+      // 5. Admin upload -> ALLOW
+      allow write: if isAdmin()
+        && request.resource.size <= 25 * 1024 * 1024
+        && (request.resource.contentType.matches('application/pdf') || request.resource.contentType.matches('image/.*'));
+
+      // DELETE / CLEANUP: Strictly Owner / Admin
+      // 6. Anonymous delete -> DENY
+      // 7. Student delete -> DENY
+      // 8. Teacher delete -> DENY
+      // 9. Owner delete -> ALLOW
+      // 10. Admin delete -> ALLOW
+      allow delete: if isAdmin();
+    }
+
+    // Study Materials & PYQs (/study-materials/{allPaths=**})
+    match /study-materials/{allPaths=**} {
+      allow read: if true;
+      allow write, delete: if isAdmin();
+    }
+
+    // Owner Profile & Institution Logo (/owner-profile/{uid}/{fileName})
+    match /owner-profile/{uid}/{fileName} {
+      allow read: if true; // Publicly readable for rendering
+      allow write: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.size <= 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Default deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

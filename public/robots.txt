@@ -1,0 +1,43 @@
+# RK STUDY CENTRE - Official Robots.txt
+User-agent: *
+Allow: /
+Allow: /classes
+Allow: /study-material
+Allow: /tests
+Allow: /courses
+Allow: /vlogs
+Allow: /solve-doubt
+Allow: /formula-bank
+Allow: /omr-simulator
+Allow: /science-lab
+Allow: /study-tracker
+Allow: /about-us
+Allow: /faq
+Allow: /contact-support
+Allow: /policies
+Allow: /terms-and-conditions
+Allow: /privacy-policy
+Allow: /refund-cancellation
+Allow: /data-privacy
+Allow: /class-10-maths-notes
+Allow: /class-10-science-notes
+Allow: /class-10-social-science-notes
+Allow: /bihar-board-class-10-notes
+Allow: /bseb-matric-notes
+Allow: /class-10-vvi-questions
+Allow: /class-10-online-study
+Allow: /class-9-to-12-online-study
+Allow: /class-12-physics-notes
+
+# Disallow private, account, and administrative areas
+Disallow: /owner
+Disallow: /owner/
+Disallow: /admin-access-check
+Disallow: /admin-check
+Disallow: /my-progress
+Disallow: /my-progress/
+Disallow: /login
+Disallow: /register
+Disallow: /api/
+
+Sitemap: https://ais-pre-rc6a3dh6aea5krtenpyoim-256353323201.asia-southeast1.run.app/sitemap.xml

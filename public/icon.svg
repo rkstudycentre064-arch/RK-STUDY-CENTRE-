@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="rkBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="rkGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#f59e0b" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#rkBgGrad)" />
+  <!-- Border ring -->
+  <circle cx="256" cy="256" r="210" fill="none" stroke="#3b82f6" stroke-width="8" opacity="0.4" />
+  
+  <!-- Book and Education Emblem -->
+  <g transform="translate(106, 126)">
+    <!-- Graduation Cap / Top -->
+    <path d="M150 20 L270 75 L150 130 L30 75 Z" fill="url(#rkGoldGrad)" />
+    <path d="M270 75 L285 140" stroke="#fbbf24" stroke-width="6" stroke-linecap="round" />
+    <circle cx="285" cy="145" r="8" fill="#fbbf24" />
+    <path d="M90 102 L90 155 Q150 185 210 155 L210 102" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" />
+
+    <!-- Open Book Pages -->
+    <path d="M20 180 Q150 160 150 210 Q150 160 280 180 L280 250 Q150 230 150 280 Q150 230 20 250 Z" fill="#ffffff" fill-opacity="0.95" />
+    <path d="M150 210 L150 280" stroke="#1e3a8a" stroke-width="6" stroke-linecap="round" />
+  </g>
+
+  <!-- Text RK -->
+  <text x="256" y="440" text-anchor="middle" font-family="'Plus Jakarta Sans', sans-serif" font-weight="900" font-size="52" fill="#fbbf24" letter-spacing="4">RK STUDY</text>
+</svg>

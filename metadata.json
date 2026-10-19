@@ -1,0 +1,6 @@
+{
+  "name": "RK STUDY CENTRE",
+  "description": "RK STUDY CENTRE is designed to provide students with easy, reliable and exam-focused study materials, notes, practice resources and learning support in one place.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

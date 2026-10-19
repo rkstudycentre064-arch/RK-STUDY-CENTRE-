@@ -1,0 +1,378 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // 1. GLOBAL SAFETY NET & HELPERS
+    // ==========================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'rkstudycentre064@gmail.com' ||
+        request.auth.token.role == 'owner'
+      );
+    }
+
+    function isServerOrAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'rkstudycentre064@gmail.com' ||
+        request.auth.token.email == 'server@rkstudycentre.internal' ||
+        request.auth.token.role == 'owner'
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches("^[a-zA-Z0-9_\\-\\.]+$");
+    }
+
+    function getUserRole() {
+      return request.auth.token.role != null ? request.auth.token.role : 'student';
+    }
+
+    function isStudent() {
+      return isSignedIn() && (getUserRole() == 'student');
+    }
+
+    function isTeacher() {
+      return isSignedIn() && (getUserRole() == 'teacher');
+    }
+
+    function getStudentClassLevel() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ?
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('classLevel', '') : '';
+    }
+
+    function getStudentEnrolledCourses() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) ?
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('enrolledCourseIds', []) : [];
+    }
+
+    function getTeacherAssignedCourses() {
+      return exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ?
+        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('assignedCourseIds', []) : [];
+    }
+
+    function getTeacherAssignedClasses() {
+      return exists(/databases/$(database)/documents/teachers/$(request.auth.uid)) ?
+        get(/databases/$(database)/documents/teachers/$(request.auth.uid)).data.get('classLevels', []) : [];
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // ==========================================
+    // 2. ENTITY VALIDATIONS
+    // ==========================================
+
+    function isValidUser(data) {
+      return data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.displayName is string && data.displayName.size() <= 128 &&
+             (data.get('enrolledCourseIds', []) is list && data.get('enrolledCourseIds', []).size() <= 20) &&
+             (data.get('completedTestIds', []) is list && data.get('completedTestIds', []).size() <= 100) &&
+             (data.get('role', 'student') == 'student' || isAdmin());
+    }
+
+    function isValidTestResult(data) {
+      return data.testId is string && data.testId.size() <= 128 &&
+             data.studentId == request.auth.uid &&
+             data.score is number && data.score >= 0 &&
+             data.completedAt is string;
+    }
+
+    // ==========================================
+    // 3. COLLECTION MATCH BLOCKS
+    // ==========================================
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if (isOwner(userId) || isAdmin()) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isAdmin() || (isOwner(userId) && 
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'displayName', 'phone', 'phoneNumber', 'photoURL',
+          'classLevel', 'board', 'enrolledCourseIds', 'completedTestIds', 'status', 'updatedAt'
+        ]) &&
+        isValidUser(incoming()));
+      allow delete: if isAdmin();
+    }
+
+    // Curriculum Hierarchy (Read Public, Write Admin)
+    match /classes/{classId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(classId);
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(subjectId);
+    }
+
+    match /books/{bookId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(bookId);
+    }
+
+    match /chapters/{chapterId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(chapterId);
+    }
+
+    // Study Materials & Tests
+    match /studyMaterials/{materialId} {
+      allow read: if true;
+      allow write: if isServerOrAdmin() && isValidId(materialId);
+    }
+
+    // Durable Cloud PDF Storage (Strict: Admin & System Backend Server only)
+    match /pdfStorage/{fileId} {
+      allow read, write: if isServerOrAdmin();
+
+      match /chunks/{chunkId} {
+        allow read, write: if isServerOrAdmin();
+      }
+    }
+
+    match /tests/{testId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(testId);
+    }
+
+    // Test Submissions
+    match /testResults/{resultId} {
+      allow read: if isAdmin() || (isSignedIn() && existing().studentId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(resultId) && isValidTestResult(incoming());
+      allow update, delete: if isAdmin();
+    }
+
+    // Courses
+    match /courses/{courseId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(courseId);
+    }
+
+    // Vlogs (Read Public, Action-based increments)
+    match /vlogs/{vlogId} {
+      allow read: if true;
+      allow create, delete: if isAdmin() && isValidId(vlogId);
+      allow update: if isAdmin() || (
+        isValidId(vlogId) &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['viewsCount', 'likesCount', 'commentsCount']) &&
+        incoming().viewsCount is number &&
+        incoming().likesCount is number
+      );
+
+      match /comments/{commentId} {
+        allow read: if true;
+        allow create: if isSignedIn() && isValidId(commentId);
+        allow update, delete: if isAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+      }
+    }
+
+    // Settings
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidId(settingId);
+    }
+
+    // Teachers (Protected: Only Admin/Owner can read, create, update, delete)
+    match /teachers/{teacherId} {
+      allow read, write: if isAdmin() && isValidId(teacherId);
+    }
+
+    // Timetable & Class Schedules (Protected: Only Admin/Owner can read, create, update, delete)
+    match /timetable/{timetableId} {
+      allow read, write: if isAdmin() && isValidId(timetableId);
+    }
+
+    // Attendance Records (Protected: Only Admin/Owner can read, create, update, delete)
+    match /attendance/{attendanceId} {
+      allow read, write: if isAdmin() && isValidId(attendanceId);
+    }
+
+    // Fee & Payment Records (Protected: Only Admin/Owner can read, create, update, delete)
+    match /fees/{feeId} {
+      allow read, write: if isAdmin() && isValidId(feeId);
+    }
+
+    // Institutional Exams & Date Sheet Schedules (Protected: Only Admin/Owner can read, create, update, delete)
+    match /exams/{examId} {
+      allow read, write: if isAdmin() && isValidId(examId);
+    }
+
+    // Institutional Exam Results & Scorecards (Protected: Only Admin/Owner can read, create, update, delete)
+    match /results/{resultId} {
+      allow read, write: if isAdmin() && isValidId(resultId);
+    }
+
+    // Institutional Notices & Circulars (Published notices readable by users; full manage by Admin/Owner)
+    match /notices/{noticeId} {
+      allow read: if isAdmin() || resource.data.publishStatus == 'published' || resource.data.status == 'published';
+      allow write: if isAdmin() && isValidId(noticeId);
+    }
+
+    // Messages & Inquiries (Public creation with strict field whitelist; Admin/Owner full management)
+    match /inquiries/{inquiryId} {
+      allow create: if isValidId(inquiryId) && (
+        // Admin/Owner can create any valid inquiry record (e.g. manual intake with internal metadata)
+        isAdmin() ||
+        // Public/Student submission with strict true field whitelist & forced safe initial state
+        (
+          // 1. True Field Whitelist: denies any extra/unknown fields (e.g. foo, internalNote, adminFlag, reply, assignedTo)
+          request.resource.data.keys().hasOnly([
+            'id', 'name', 'phone', 'email', 'subject', 'message',
+            'inquiryType', 'source', 'status', 'priority',
+            'classLevel', 'createdAt', 'updatedAt', 'lastActivityAt', 'serverTimestamp', 'userId'
+          ]) &&
+          // 2. Required string fields & bounds
+          request.resource.data.name is string &&
+          request.resource.data.name.size() > 0 &&
+          request.resource.data.name.size() <= 128 &&
+          request.resource.data.message is string &&
+          request.resource.data.message.size() > 0 &&
+          request.resource.data.message.size() <= 4000 &&
+          // 3. Forced safe initial state
+          request.resource.data.status == 'New' &&
+          request.resource.data.priority == 'Normal' &&
+          // 4. Source integrity: Anonymous callers MUST use 'Website'; Authenticated users can use 'Website' or 'Student'
+          (
+            (request.auth == null && request.resource.data.source == 'Website') ||
+            (request.auth != null && request.resource.data.source in ['Website', 'Student'])
+          ) &&
+          // 5. User ID integrity: Anonymous callers cannot set userId; Authenticated users can only set their own auth UID
+          (
+            (request.auth == null && (!('userId' in request.resource.data.keys()) || request.resource.data.userId == null || request.resource.data.userId == '')) ||
+            (request.auth != null && (!('userId' in request.resource.data.keys()) || request.resource.data.userId == request.auth.uid))
+          )
+        )
+      );
+      allow read, update, delete: if isAdmin() && isValidId(inquiryId);
+    }
+
+    // In-App Notifications & Alerts (Task 16 - Hardened Security)
+    match /notifications/{notificationId} {
+      // 1. READ AUTHORIZATION
+      allow read: if isSignedIn() && isValidId(notificationId) && (
+        // A. Admin/Owner has full access
+        isAdmin() ||
+        // B. Individual recipient match
+        (resource.data.recipientScope == 'Individual' && resource.data.recipientId == request.auth.uid) ||
+        // C. Role-wide broadcast (Owner/Admin private notifications strictly denied to students/teachers)
+        (
+          resource.data.recipientScope == 'Role' && 
+          resource.data.recipientRole != 'owner' && 
+          resource.data.recipientRole != 'admin' && 
+          resource.data.recipientRole == getUserRole()
+        ) ||
+        // D. General 'All' Broadcast (must not be private to owner/admin)
+        (
+          resource.data.recipientScope == 'All' && 
+          resource.data.get('recipientRole', 'all') != 'owner' && 
+          resource.data.get('recipientRole', 'all') != 'admin'
+        ) ||
+        // E. Class-scoped targeting
+        (
+          resource.data.recipientScope == 'Class' &&
+          resource.data.classLevel != null && (
+            (isStudent() && getStudentClassLevel() == resource.data.classLevel) ||
+            (isTeacher() && resource.data.classLevel in getTeacherAssignedClasses())
+          )
+        ) ||
+        // F. Course-scoped targeting
+        (
+          resource.data.recipientScope == 'Course' &&
+          resource.data.courseId != null && (
+            (isStudent() && resource.data.courseId in getStudentEnrolledCourses()) ||
+            (isTeacher() && resource.data.courseId in getTeacherAssignedCourses())
+          )
+        )
+      );
+
+      // 2. CREATE, UPDATE, DELETE AUTHORIZATION (Owner/Admin only - Shared notification documents are immutable for non-admins)
+      allow create, update, delete: if isAdmin() && isValidId(notificationId);
+    }
+
+    // Per-User Notification Read State (Task 16 - Isolated per-user read/unread state)
+    match /notificationReads/{readId} {
+      allow read: if isSignedIn() && isValidId(readId) && (
+        isAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create, update: if isSignedIn() && isValidId(readId) && (
+        isAdmin() ||
+        (
+          request.resource.data.userId == request.auth.uid &&
+          readId == request.auth.uid + '_' + request.resource.data.notificationId &&
+          request.resource.data.keys().hasOnly([
+            'id', 'notificationId', 'userId', 'isRead', 'readAt', 'updatedAt', 'serverTimestamp'
+          ]) &&
+          request.resource.data.isRead is bool
+        )
+      );
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // Topic-wise AI Doubt Conversations (Strict User-Isolated Ownership)
+    match /doubtConversations/{conversationId} {
+      allow read: if isSignedIn() && isValidId(conversationId) && (
+        isAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn() && isValidId(conversationId) && (
+        isAdmin() ||
+        (request.resource.data.userId == request.auth.uid)
+      );
+      allow update: if isSignedIn() && isValidId(conversationId) && (
+        isAdmin() ||
+        (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid)
+      );
+      allow delete: if isSignedIn() && isValidId(conversationId) && (
+        isAdmin() ||
+        resource.data.userId == request.auth.uid
+      );
+
+      // Messages in conversation
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && isValidId(messageId) && (
+          isAdmin() ||
+          resource.data.userId == request.auth.uid ||
+          get(/databases/$(database)/documents/doubtConversations/$(conversationId)).data.userId == request.auth.uid
+        );
+        allow create: if isSignedIn() && isValidId(messageId) && (
+          isAdmin() ||
+          (request.resource.data.userId == request.auth.uid)
+        );
+        allow update, delete: if isSignedIn() && isValidId(messageId) && (
+          isAdmin() ||
+          resource.data.userId == request.auth.uid
+        );
+      }
+    }
+
+    // Connectivity Test
+    match /test/{docId} {
+      allow read: if true;
+    }
+  }
+}
